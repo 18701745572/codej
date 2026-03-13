@@ -1,8 +1,20 @@
-# 简化的多平台编译工作流
+# 简化的多平台编译工作流 - 生成可下载的安装包
+# 适用于 fork 仓库，使用标准 GitHub runners，无需额外 secrets
 name: Build Simple
 
 on:
   workflow_dispatch:
+    inputs:
+      release_channel:
+        description: '发布通道'
+        required: false
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - preview
+          - nightly
+          - dev
   push:
     branches: [main]
     tags: ['v*']
@@ -11,6 +23,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   CARGO_INCREMENTAL: 0
+  ALLOW_MISSING_LICENSES: 1
 
 jobs:
   macos-aarch64:
@@ -34,47 +47,52 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-bundle
-        run: cargo install cargo-bundle --git https://github.com/zed-industries/cargo-bundle.git --branch zed-deploy || true
+        run: cargo install cargo-bundle --git https://github.com/zed-industries/cargo-bundle.git --branch zed-deploy
 
       - name: Set channel
-        run: echo stable > crates/zed/RELEASE_CHANNEL
+        run: |
+          channel="${{ github.event.inputs.release_channel || 'stable' }}"
+          echo "$channel" > crates/zed/RELEASE_CHANNEL
+          echo "ZED_RELEASE_CHANNEL=$channel" >> $GITHUB_ENV
 
       - name: Generate licenses
-        run: ./script/generate-licenses || echo License generation failed
+        run: ./script/generate-licenses
 
       - name: Build Zed
         env:
           ZED_BUNDLE: "true"
           CXXFLAGS: "-stdlib=libc++"
-        run: cargo build --release --package zed --package cli --target aarch64-apple-darwin
-
-      - name: Build remote_server
-        run: cargo build --release --package remote_server --target aarch64-apple-darwin
+        run: |
+          cargo build --release --package zed --package cli --target aarch64-apple-darwin
+          cargo build --release --package remote_server --target aarch64-apple-darwin
 
       - name: Create bundle
         run: |
           cd crates/zed
-          cp Cargo.toml Cargo.toml.backup
-          sed -i.backup 's/package.metadata.bundle-stable/package.metadata.bundle/' Cargo.toml
-          cargo bundle --release --target aarch64-apple-darwin --select-workspace-root || echo Bundle failed
-          mv Cargo.toml.backup Cargo.toml
+          cp Cargo.toml Cargo.toml.bak
+          sed -i.bak "s/package.metadata.bundle-${ZED_RELEASE_CHANNEL}/package.metadata.bundle/" Cargo.toml
+          cargo bundle --release --target aarch64-apple-darwin --select-workspace-root
+          mv Cargo.toml.bak Cargo.toml
+          cd ../..
 
       - name: Create DMG
         run: |
           mkdir -p target/aarch64-apple-darwin/release/dmg
-          cp -r target/aarch64-apple-darwin/release/bundle/osx/Zed.app target/aarch64-apple-darwin/release/dmg/ 2>/dev/null || echo No bundle found
+          app_path=$(find target/aarch64-apple-darwin/release -name "Zed.app" -type d | head -n 1)
+          cp -r "$app_path" target/aarch64-apple-darwin/release/dmg/
           ln -sf /Applications target/aarch64-apple-darwin/release/dmg/Applications
-          hdiutil create -volname Zed -srcfolder target/aarch64-apple-darwin/release/dmg -ov -format UDZO target/Zed-aarch64.dmg || echo DMG creation failed
+          hdiutil create -volname Zed -srcfolder target/aarch64-apple-darwin/release/dmg -ov -format UDZO target/aarch64-apple-darwin/release/Zed-aarch64.dmg
 
       - name: Package remote_server
-        run: gzip -c target/aarch64-apple-darwin/release/remote_server > target/zed-remote-server-macos-aarch64.gz || echo No remote_server
+        run: gzip -f --stdout --best target/aarch64-apple-darwin/release/remote_server > target/zed-remote-server-macos-aarch64.gz
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: macos-aarch64
-          path: target/*.dmg
-          if-no-files-found: warn
+          path: |
+            target/aarch64-apple-darwin/release/Zed-aarch64.dmg
+            target/zed-remote-server-macos-aarch64.gz
 
   linux-x86_64:
     runs-on: ubuntu-22.04
@@ -93,24 +111,23 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libfontconfig1-dev libwayland-dev libxkbcommon-x11-dev libssl-dev libzstd-dev libvulkan-dev clang mold git cmake pkg-config
+        run: ./script/linux
 
       - name: Set channel
-        run: echo stable > crates/zed/RELEASE_CHANNEL
+        run: |
+          channel="${{ github.event.inputs.release_channel || 'stable' }}"
+          echo "$channel" > crates/zed/RELEASE_CHANNEL
 
       - name: Generate licenses
-        run: ./script/generate-licenses || echo License generation failed
+        run: ./script/generate-licenses
 
       - name: Build Zed
         env:
           ZED_BUNDLE: "true"
           RUSTFLAGS: "-C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
-        run: cargo build --release --package zed --package cli
-
-      - name: Build remote_server
-        run: cargo build --release --package remote_server
+        run: |
+          cargo build --release --package zed --package cli
+          cargo build --release --package remote_server
 
       - name: Create tarball
         run: |
@@ -121,16 +138,15 @@ jobs:
           tar -czvf target/zed-linux-x86_64.tar.gz -C "${temp_dir}" zed.app
 
       - name: Package remote_server
-        run: gzip -c target/release/remote_server > target/zed-remote-server-linux-x86_64.gz
+        run: gzip -f --stdout --best target/release/remote_server > target/zed-remote-server-linux-x86_64.gz
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
           path: |
-            target/*.tar.gz
-            target/*.gz
-          if-no-files-found: warn
+            target/zed-linux-x86_64.tar.gz
+            target/zed-remote-server-linux-x86_64.gz
 
   windows-x86_64:
     runs-on: windows-latest
@@ -153,33 +169,62 @@ jobs:
       - name: Set channel
         shell: pwsh
         run: |
-          "stable" | Set-Content crates/zed/RELEASE_CHANNEL
-          "ZED_WORKSPACE=${{ github.workspace }}" | Out-File $env:GITHUB_ENV -Append
+          $channel = "${{ github.event.inputs.release_channel || 'stable' }}"
+          $channel | Set-Content -Path "crates/zed/RELEASE_CHANNEL" -NoNewline
+          $env:ZED_RELEASE_CHANNEL = $channel
 
       - name: Generate licenses
         shell: pwsh
-        run: if (Test-Path ./script/generate-licenses.ps1) { . ./script/generate-licenses.ps1 }
+        run: . ./script/generate-licenses.ps1
 
       - name: Build Zed
         shell: pwsh
         run: |
           $env:ZED_BUNDLE = "true"
-          cargo build --release --package zed --package cli --target x86_64-pc-windows-msvc
-          cargo build --release --package remote_server --target x86_64-pc-windows-msvc
+          $target = "x86_64-pc-windows-msvc"
+          rustup target add $target
+          cargo build --release --package zed --package cli --target $target
+          cargo build --release --package remote_server --target $target
 
       - name: Package
         shell: pwsh
         run: |
           $out = "${{ github.workspace }}\target\release-packages"
           New-Item -Path $out -ItemType Directory -Force
-          Copy-Item "target\x86_64-pc-windows-msvc\release\zed.exe" "$out\" -ErrorAction SilentlyContinue
-          Copy-Item "target\x86_64-pc-windows-msvc\release\cli.exe" "$out\zed-cli.exe" -ErrorAction SilentlyContinue
-          Compress-Archive -Path "$out\*" "target\Zed-windows-x86_64.zip" -Force
-          Compress-Archive -Path "target\x86_64-pc-windows-msvc\release\remote_server.exe" "target\zed-remote-server-windows-x86_64.zip" -Force
+          Copy-Item "target\x86_64-pc-windows-msvc\release\zed.exe" "$out\"
+          Copy-Item "target\x86_64-pc-windows-msvc\release\cli.exe" "$out\zed-cli.exe"
+          Compress-Archive -Path "$out\*" -DestinationPath "target\Zed-windows-x86_64.zip" -Force
+          Compress-Archive -Path "target\x86_64-pc-windows-msvc\release\remote_server.exe" -DestinationPath "target\zed-remote-server-windows-x86_64.zip" -Force
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64
-          path: target/*.zip
-          if-no-files-found: warn
+          path: |
+            target/Zed-windows-x86_64.zip
+            target/zed-remote-server-windows-x86_64.zip
+
+  create_release:
+    needs:
+      - macos-aarch64
+      - linux-x86_64
+      - windows-x86_64
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/macos-aarch64/*
+            artifacts/linux-x86_64/*
+            artifacts/windows-x86_64/*
+          draft: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
