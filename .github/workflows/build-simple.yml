@@ -34,7 +34,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
 
@@ -105,7 +105,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
@@ -156,7 +156,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
