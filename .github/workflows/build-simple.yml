@@ -56,7 +56,7 @@ jobs:
           echo "ZED_RELEASE_CHANNEL=$channel" >> $GITHUB_ENV
 
       - name: Generate licenses
-        run: ./script/generate-licenses
+        run: bash script/generate-licenses
 
       - name: Build Zed
         env:
@@ -111,7 +111,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install deps
-        run: ./script/linux
+        run: bash script/linux
 
       - name: Set channel
         run: |
@@ -119,7 +119,7 @@ jobs:
           echo "$channel" > crates/zed/RELEASE_CHANNEL
 
       - name: Generate licenses
-        run: ./script/generate-licenses
+        run: bash script/generate-licenses
 
       - name: Build Zed
         env:
@@ -154,6 +154,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Enable long paths (Windows)
+        shell: pwsh
+        run: git config --global core.longpaths true
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
