@@ -1,0 +1,416 @@
+# 多平台编译工作流 - 适用于 fork 仓库
+# 此工作流支持在 GitHub Actions 上编译 macOS、Linux 和 Windows 的安装包
+name: Build All Platforms
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      release_channel:
+        description: '发布通道 (stable/preview/nightly/dev)'
+        required: true
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - preview
+          - nightly
+          - dev
+  # 推送标签时自动触发
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  # ==================== macOS aarch64 (Apple Silicon) ====================
+  bundle_mac_aarch64:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install cargo-bundle
+        run: |
+          cargo install cargo-bundle --git https://github.com/zed-industries/cargo-bundle.git --branch zed-deploy
+
+      - name: Set release channel
+        run: |
+          channel="${{ github.event.inputs.release_channel || 'stable' }}"
+          echo "$channel" > crates/zed/RELEASE_CHANNEL
+          echo "ZED_RELEASE_CHANNEL=$channel" >> $GITHUB_ENV
+
+      - name: Generate licenses
+        run: ./script/generate-licenses
+
+      - name: Build Zed (aarch64)
+        run: |
+          export ZED_BUNDLE=true
+          export CXXFLAGS="-stdlib=libc++"
+          cargo build --release --package zed --package cli --target aarch64-apple-darwin
+          cargo build --release --package remote_server --target aarch64-apple-darwin
+
+      - name: Create app bundle
+        run: |
+          cd crates/zed
+          cp Cargo.toml Cargo.toml.backup
+          sed -i.backup "s/package.metadata.bundle-${ZED_RELEASE_CHANNEL}/package.metadata.bundle/" Cargo.toml
+          app_path=$(cargo bundle --release --target aarch64-apple-darwin --select-workspace-root | xargs)
+          mv Cargo.toml.backup Cargo.toml
+          echo "Bundled $app_path"
+
+      - name: Create DMG (unsigned)
+        run: |
+          mkdir -p target/aarch64-apple-darwin/release/dmg
+          app_path=$(find target/aarch64-apple-darwin/release -name "Zed.app" -type d | head -n 1)
+          cp -r "$app_path" target/aarch64-apple-darwin/release/dmg/
+          ln -s /Applications target/aarch64-apple-darwin/release/dmg/
+          hdiutil create -volname Zed -srcfolder target/aarch64-apple-darwin/release/dmg -ov -format UDZO target/aarch64-apple-darwin/release/Zed-aarch64.dmg
+
+      - name: Package remote_server
+        run: |
+          gzip -f --stdout --best target/aarch64-apple-darwin/release/remote_server > target/zed-remote-server-macos-aarch64.gz
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-aarch64
+          path: |
+            target/aarch64-apple-darwin/release/Zed-aarch64.dmg
+            target/zed-remote-server-macos-aarch64.gz
+
+  # ==================== macOS x86_64 (Intel) ====================
+  bundle_mac_x86_64:
+    runs-on: macos-13  # macos-13 是 Intel 架构
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install cargo-bundle
+        run: |
+          cargo install cargo-bundle --git https://github.com/zed-industries/cargo-bundle.git --branch zed-deploy
+
+      - name: Set release channel
+        run: |
+          channel="${{ github.event.inputs.release_channel || 'stable' }}"
+          echo "$channel" > crates/zed/RELEASE_CHANNEL
+          echo "ZED_RELEASE_CHANNEL=$channel" >> $GITHUB_ENV
+
+      - name: Generate licenses
+        run: ./script/generate-licenses
+
+      - name: Build Zed (x86_64)
+        run: |
+          export ZED_BUNDLE=true
+          export CXXFLAGS="-stdlib=libc++"
+          cargo build --release --package zed --package cli --target x86_64-apple-darwin
+          cargo build --release --package remote_server --target x86_64-apple-darwin
+
+      - name: Create app bundle
+        run: |
+          cd crates/zed
+          cp Cargo.toml Cargo.toml.backup
+          sed -i.backup "s/package.metadata.bundle-${ZED_RELEASE_CHANNEL}/package.metadata.bundle/" Cargo.toml
+          app_path=$(cargo bundle --release --target x86_64-apple-darwin --select-workspace-root | xargs)
+          mv Cargo.toml.backup Cargo.toml
+          echo "Bundled $app_path"
+
+      - name: Create DMG (unsigned)
+        run: |
+          mkdir -p target/x86_64-apple-darwin/release/dmg
+          app_path=$(find target/x86_64-apple-darwin/release -name "Zed.app" -type d | head -n 1)
+          cp -r "$app_path" target/x86_64-apple-darwin/release/dmg/
+          ln -s /Applications target/x86_64-apple-darwin/release/dmg/
+          hdiutil create -volname Zed -srcfolder target/x86_64-apple-darwin/release/dmg -ov -format UDZO target/x86_64-apple-darwin/release/Zed-x86_64.dmg
+
+      - name: Package remote_server
+        run: |
+          gzip -f --stdout --best target/x86_64-apple-darwin/release/remote_server > target/zed-remote-server-macos-x86_64.gz
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-x86_64
+          path: |
+            target/x86_64-apple-darwin/release/Zed-x86_64.dmg
+            target/zed-remote-server-macos-x86_64.gz
+
+  # ==================== Linux x86_64 ====================
+  bundle_linux_x86_64:
+    runs-on: ubuntu-22.04
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libssl-dev \
+            libzstd-dev \
+            clang \
+            mold \
+            curl
+
+      - name: Set release channel
+        run: |
+          channel="${{ github.event.inputs.release_channel || 'stable' }}"
+          echo "$channel" > crates/zed/RELEASE_CHANNEL
+
+      - name: Generate licenses
+        run: ./script/generate-licenses
+
+      - name: Build Zed
+        run: |
+          export ZED_BUNDLE=true
+          export RUSTFLAGS="-C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+          cargo build --release --package zed --package cli
+          cargo build --release --package remote_server --target x86_64-unknown-linux-musl
+
+      - name: Create tarball
+        run: |
+          ./script/bundle-linux
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            target/release/zed-linux-x86_64.tar.gz
+            target/zed-remote-server-linux-x86_64.gz
+
+  # ==================== Linux aarch64 ====================
+  bundle_linux_aarch64:
+    runs-on: ubuntu-22.04
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libfontconfig1-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libssl-dev \
+            libzstd-dev \
+            clang \
+            mold \
+            curl \
+            gcc-aarch64-linux-gnu
+
+      - name: Add Rust target
+        run: rustup target add aarch64-unknown-linux-gnu
+
+      - name: Set release channel
+        run: |
+          channel="${{ github.event.inputs.release_channel || 'stable' }}"
+          echo "$channel" > crates/zed/RELEASE_CHANNEL
+
+      - name: Generate licenses
+        run: ./script/generate-licenses
+
+      - # Note: Cross-compilation requires additional setup
+        name: Build Zed (cross compile aarch64)
+        run: |
+          export ZED_BUNDLE=true
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export RUSTFLAGS="-C link-args=-Wl,--disable-new-dtags,-rpath,\$ORIGIN/../lib"
+          cargo build --release --package zed --package cli --target aarch64-unknown-linux-gnu || true
+          echo "Note: Linux aarch64 cross-compilation may require additional setup"
+
+      - name: Upload artifacts (if build succeeded)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: |
+            target/aarch64-unknown-linux-gnu/release/zed
+          if-no-files-found: ignore
+
+  # ==================== Windows x86_64 ====================
+  bundle_windows_x86_64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup Visual Studio
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set release channel
+        shell: pwsh
+        run: |
+          $channel = "${{ github.event.inputs.release_channel || 'stable' }}"
+          $channel | Set-Content -Path "crates/zed/RELEASE_CHANNEL"
+          "ZED_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Generate licenses
+        shell: pwsh
+        run: |
+          . ./script/generate-licenses.ps1
+
+      - name: Build Zed
+        shell: pwsh
+        run: |
+          $env:ZED_BUNDLE = "true"
+          $target = "x86_64-pc-windows-msvc"
+          rustup target add $target
+          cargo build --release --package zed --package cli --package auto_update_helper --target $target
+          cargo build --release --package remote_server --target $target
+
+      - name: Create installer (Inno Setup)
+        shell: pwsh
+        run: |
+          # 下载并安装 Inno Setup
+          $url = "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe"
+          Invoke-WebRequest -Uri $url -OutFile "innosetup.exe"
+          Start-Process -FilePath "innosetup.exe" -ArgumentList "/SILENT", "/NORESTART" -Wait
+
+          # 运行打包脚本（简化版，无代码签名）
+          ./script/bundle-windows.ps1 -Architecture x86_64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: |
+            target/Zed-x86_64.exe
+            target/zed-remote-server-windows-x86_64.zip
+          if-no-files-found: ignore
+
+  # ==================== Windows aarch64 ====================
+  bundle_windows_aarch64:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Setup Visual Studio
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Set release channel
+        shell: pwsh
+        run: |
+          $channel = "${{ github.event.inputs.release_channel || 'stable' }}"
+          $channel | Set-Content -Path "crates/zed/RELEASE_CHANNEL"
+          "ZED_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Generate licenses
+        shell: pwsh
+        run: |
+          . ./script/generate-licenses.ps1
+
+      - name: Build Zed
+        shell: pwsh
+        run: |
+          $env:ZED_BUNDLE = "true"
+          $target = "aarch64-pc-windows-msvc"
+          rustup target add $target
+          cargo build --release --package zed --package cli --package auto_update_helper --target $target
+          cargo build --release --package remote_server --target $target
+
+      - name: Create installer (Inno Setup)
+        shell: pwsh
+        run: |
+          # 下载并安装 Inno Setup
+          $url = "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe"
+          Invoke-WebRequest -Uri $url -OutFile "innosetup.exe"
+          Start-Process -FilePath "innosetup.exe" -ArgumentList "/SILENT", "/NORESTART" -Wait
+
+          # 运行打包脚本（简化版，无代码签名）
+          ./script/bundle-windows.ps1 -Architecture aarch64
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-aarch64
+          path: |
+            target/Zed-aarch64.exe
+            target/zed-remote-server-windows-aarch64.zip
+          if-no-files-found: ignore
+
+  # ==================== 创建发布 (Release) ====================
+  create_release:
+    needs:
+      - bundle_mac_aarch64
+      - bundle_mac_x86_64
+      - bundle_linux_x86_64
+      - bundle_linux_aarch64
+      - bundle_windows_x86_64
+      - bundle_windows_aarch64
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.tar.gz
+            artifacts/**/*.exe
+            artifacts/**/*.gz
+            artifacts/**/*.zip
+          draft: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
