@@ -4,7 +4,6 @@ use chrono::{DateTime, Utc};
 use cloud_api_client::websocket_protocol::MessageToClient;
 use cloud_api_client::{
     GetAuthenticatedUserResponse, KnownOrUnknown, Organization, OrganizationId, Plan, PlanInfo,
-    UserApiKeys, UserPreferences,
 };
 use credentials_provider::CredentialsProvider;
 use cloud_llm_client::{
@@ -24,6 +23,7 @@ use std::{
     str::FromStr as _,
     sync::{Arc, Weak},
 };
+use settings::Settings;
 use text::ReplicaId;
 use util::{ResultExt, TryFutureExt as _};
 
@@ -45,7 +45,9 @@ async fn sync_from_codej(
     cloud_client: &cloud_api_client::CloudApiClient,
     cx: &mut AsyncApp,
 ) -> Result<()> {
-    let server_url = cx.update(|cx| ClientSettings::get_global(cx).server_url.clone())?;
+    let server_url = cx
+        .update(|cx| ClientSettings::get_global(cx).server_url.clone())
+        .await;
     if !is_codej_server(&server_url) {
         return Ok(());
     }
@@ -76,13 +78,15 @@ async fn sync_from_codej(
                         });
                     }
                 });
-            })?;
+            })
+            .await;
         }
     }
 
     if let Ok(Some(keys)) = cloud_client.get_user_api_keys().await {
         if !keys.is_empty() {
-            let credentials_provider = cx.update(|cx| <dyn CredentialsProvider>::global(cx))?;
+            let credentials_provider: Arc<dyn CredentialsProvider> =
+                cx.update(|cx| <dyn CredentialsProvider>::global(cx)).await;
             for (provider, key) in keys {
                 let key = key.trim().to_string();
                 if key.is_empty() {
@@ -309,7 +313,7 @@ impl UserStore {
                                     .log_err();
 
                                 let current_user_and_response = if let Some(response) = response {
-                                    sync_from_codej(client.cloud_client(), &mut cx)
+                                    sync_from_codej(client.cloud_client().as_ref(), &mut cx)
                                         .await
                                         .log_err();
 
