@@ -1,10 +1,12 @@
-use super::{Client, Status, TypedEnvelope, proto};
+use super::{Client, ClientSettings, Status, TypedEnvelope, proto};
 use anyhow::{Context as _, Result};
 use chrono::{DateTime, Utc};
 use cloud_api_client::websocket_protocol::MessageToClient;
 use cloud_api_client::{
     GetAuthenticatedUserResponse, KnownOrUnknown, Organization, OrganizationId, Plan, PlanInfo,
+    UserApiKeys, UserPreferences,
 };
+use credentials_provider::CredentialsProvider;
 use cloud_llm_client::{
     EDIT_PREDICTIONS_USAGE_AMOUNT_HEADER_NAME, EDIT_PREDICTIONS_USAGE_LIMIT_HEADER_NAME, UsageLimit,
 };
@@ -24,6 +26,83 @@ use std::{
 };
 use text::ReplicaId;
 use util::{ResultExt, TryFutureExt as _};
+
+fn is_codej_server(server_url: &str) -> bool {
+    !matches!(
+        server_url,
+        "https://zed.dev" | "https://staging.zed.dev" | "http://localhost:3000"
+    )
+}
+
+const PROVIDER_API_URLS: &[(&str, &str)] = &[
+    ("openai", "https://api.openai.com/v1"),
+    ("anthropic", "https://api.anthropic.com"),
+    ("deepseek", "https://api.deepseek.com/v1"),
+    ("kimi", "https://api.moonshot.ai/v1"),
+];
+
+async fn sync_from_codej(
+    cloud_client: &cloud_api_client::CloudApiClient,
+    cx: &mut AsyncApp,
+) -> Result<()> {
+    let server_url = cx.update(|cx| ClientSettings::get_global(cx).server_url.clone())?;
+    if !is_codej_server(&server_url) {
+        return Ok(());
+    }
+
+    if let Ok(Some(prefs)) = cloud_client.get_user_preferences().await {
+        let has_prefs = prefs.default_model.is_some() || prefs.inline_assistant_model.is_some();
+        if has_prefs {
+            let default_model = prefs.default_model.clone();
+            let inline_assistant_model = prefs.inline_assistant_model.clone();
+            cx.update(|cx| {
+                let fs = <dyn fs::Fs>::global(cx);
+                settings::update_settings_file(fs, cx, move |settings, _cx| {
+                    let agent = settings.agent.get_or_insert_default();
+                    if let Some(sel) = default_model {
+                        agent.default_model = Some(settings::LanguageModelSelection {
+                            provider: settings::LanguageModelProviderSetting(sel.provider),
+                            model: sel.model,
+                            enable_thinking: false,
+                            effort: None,
+                        });
+                    }
+                    if let Some(sel) = inline_assistant_model {
+                        agent.inline_assistant_model = Some(settings::LanguageModelSelection {
+                            provider: settings::LanguageModelProviderSetting(sel.provider),
+                            model: sel.model,
+                            enable_thinking: false,
+                            effort: None,
+                        });
+                    }
+                });
+            })?;
+        }
+    }
+
+    if let Ok(Some(keys)) = cloud_client.get_user_api_keys().await {
+        if !keys.is_empty() {
+            let credentials_provider = cx.update(|cx| <dyn CredentialsProvider>::global(cx))?;
+            for (provider, key) in keys {
+                let key = key.trim().to_string();
+                if key.is_empty() {
+                    continue;
+                }
+                if let Some((_, api_url)) = PROVIDER_API_URLS
+                    .iter()
+                    .find(|(p, _)| *p == provider)
+                {
+                    credentials_provider
+                        .write_credentials(api_url, "Bearer", key.as_bytes(), cx)
+                        .await
+                        .log_err();
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
 
 pub type UserId = u64;
 
@@ -230,6 +309,10 @@ impl UserStore {
                                     .log_err();
 
                                 let current_user_and_response = if let Some(response) = response {
+                                    sync_from_codej(client.cloud_client(), &mut cx)
+                                        .await
+                                        .log_err();
+
                                     let user = Arc::new(User {
                                         id: user_id,
                                         github_login: response.user.github_login.clone().into(),

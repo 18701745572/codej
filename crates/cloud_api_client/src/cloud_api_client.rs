@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
 use cloud_api_types::websocket_protocol::{PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER_NAME};
-pub use cloud_api_types::*;
+pub use cloud_api_types::{UserApiKeys, UserPreferences, *};
 use futures::AsyncReadExt as _;
 use gpui::{App, Task};
 use gpui_tokio::Tokio;
@@ -109,6 +109,101 @@ impl CloudApiClient {
             .context("failed to read response body")?;
 
         Ok(serde_json::from_str(&body).context("failed to parse response body")?)
+    }
+
+    pub async fn get_user_preferences(&self) -> Result<Option<UserPreferences>> {
+        let request = self.build_request(
+            Request::builder().method(Method::GET).uri(
+                self.http_client
+                    .build_zed_cloud_url("/client/user_preferences")?
+                    .as_ref(),
+            ),
+            AsyncBody::default(),
+        )?;
+
+        let mut response = self.http_client.send(request).await?;
+
+        if !response.status().is_success() {
+            if response.status() == StatusCode::UNAUTHORIZED
+                || response.status() == StatusCode::NOT_FOUND
+                || response.status() == StatusCode::NOT_IMPLEMENTED
+            {
+                return Ok(None);
+            }
+            let mut body = String::new();
+            response
+                .body_mut()
+                .read_to_string(&mut body)
+                .await
+                .context("failed to read response body")?;
+            return Err(anyhow::anyhow!(
+                "Failed to get user preferences. Status: {:?} Body: {body}",
+                response.status()
+            ));
+        }
+
+        let mut body = String::new();
+        response
+            .body_mut()
+            .read_to_string(&mut body)
+            .await
+            .context("failed to read response body")?;
+
+        if body.trim().is_empty() || body == "{}" {
+            return Ok(None);
+        }
+
+        Ok(serde_json::from_str(&body).context("failed to parse user preferences")?)
+    }
+
+    pub async fn get_user_api_keys(&self) -> Result<Option<UserApiKeys>> {
+        let request = self.build_request(
+            Request::builder().method(Method::GET).uri(
+                self.http_client
+                    .build_zed_cloud_url("/client/api_keys")?
+                    .as_ref(),
+            ),
+            AsyncBody::default(),
+        )?;
+
+        let mut response = self.http_client.send(request).await?;
+
+        if !response.status().is_success() {
+            if response.status() == StatusCode::UNAUTHORIZED
+                || response.status() == StatusCode::NOT_FOUND
+                || response.status() == StatusCode::NOT_IMPLEMENTED
+            {
+                return Ok(None);
+            }
+            let mut body = String::new();
+            response
+                .body_mut()
+                .read_to_string(&mut body)
+                .await
+                .context("failed to read response body")?;
+            return Err(anyhow::anyhow!(
+                "Failed to get user API keys. Status: {:?} Body: {body}",
+                response.status()
+            ));
+        }
+
+        let mut body = String::new();
+        response
+            .body_mut()
+            .read_to_string(&mut body)
+            .await
+            .context("failed to read response body")?;
+
+        if body.trim().is_empty() || body == "{}" {
+            return Ok(Some(Default::default()));
+        }
+
+        let keys: UserApiKeys =
+            serde_json::from_str(&body).context("failed to parse user API keys")?;
+        if keys.is_empty() {
+            return Ok(Some(Default::default()));
+        }
+        Ok(Some(keys))
     }
 
     pub fn connect(&self, cx: &App) -> Result<Task<Result<Connection>>> {

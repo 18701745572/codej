@@ -94,3 +94,19 @@ pub struct SubmitEditPredictionFeedbackBody {
     pub output: Option<String>,
     pub feedback: String,
 }
+
+#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
+pub struct UserPreferences {
+    #[serde(rename = "default_model")]
+    pub default_model: Option<ModelSelection>,
+    #[serde(rename = "inline_assistant_model")]
+    pub inline_assistant_model: Option<ModelSelection>,
+}
+
+#[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ModelSelection {
+    pub provider: String,
+    pub model: String,
+}
+
+pub type UserApiKeys = std::collections::HashMap<String, String>;
