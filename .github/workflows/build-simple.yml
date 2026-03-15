@@ -196,7 +196,10 @@ jobs:
           $out = "${{ github.workspace }}\target\release-packages"
           New-Item -Path $out -ItemType Directory -Force
           Copy-Item "target\x86_64-pc-windows-msvc\release\zed.exe" "$out\"
+          Copy-Item "target\x86_64-pc-windows-msvc\release\cli.exe" "$out\cli.exe"
           Copy-Item "target\x86_64-pc-windows-msvc\release\cli.exe" "$out\zed-cli.exe"
+          Copy-Item "script\install-windows.ps1" "$out\install.ps1"
+          Copy-Item "script\windows-portable-README.txt" "$out\README.txt"
           Compress-Archive -Path "$out\*" -DestinationPath "target\Zed-windows-x86_64.zip" -Force
           Compress-Archive -Path "target\x86_64-pc-windows-msvc\release\remote_server.exe" -DestinationPath "target\zed-remote-server-windows-x86_64.zip" -Force
 
