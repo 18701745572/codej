@@ -43,11 +43,10 @@ const PROVIDER_API_URLS: &[(&str, &str)] = &[
 
 async fn sync_from_codej(
     cloud_client: &cloud_api_client::CloudApiClient,
-    cx: &mut AsyncApp,
+    cx: &AsyncApp,
 ) -> Result<()> {
-    let server_url = cx
-        .update(|cx| ClientSettings::get_global(cx).server_url.clone())
-        .await;
+    let server_url: String = cx
+        .update(|cx| ClientSettings::get_global(cx).server_url.clone());
     if !is_codej_server(&server_url) {
         return Ok(());
     }
@@ -78,15 +77,14 @@ async fn sync_from_codej(
                         });
                     }
                 });
-            })
-            .await;
+            });
         }
     }
 
     if let Ok(Some(keys)) = cloud_client.get_user_api_keys().await {
         if !keys.is_empty() {
             let credentials_provider: Arc<dyn CredentialsProvider> =
-                cx.update(|cx| <dyn CredentialsProvider>::global(cx)).await;
+                cx.update(|cx| <dyn CredentialsProvider>::global(cx));
             for (provider, key) in keys {
                 let key = key.trim().to_string();
                 if key.is_empty() {
@@ -313,7 +311,7 @@ impl UserStore {
                                     .log_err();
 
                                 let current_user_and_response = if let Some(response) = response {
-                                    sync_from_codej(client.cloud_client().as_ref(), &mut cx)
+                                    sync_from_codej(client.cloud_client().as_ref(), cx)
                                         .await
                                         .log_err();
 
