@@ -326,15 +326,27 @@ struct ClientState {
 pub struct Credentials {
     pub user_id: u64,
     pub access_token: String,
+    /// For CodeJ (CUID user ids), the original string for Authorization header and credential storage.
+    pub user_id_for_header: Option<String>,
 }
 
 impl Credentials {
     pub fn authorization_header(&self) -> String {
-        format!("{} {}", self.user_id, self.access_token)
+        format!(
+            "{} {}",
+            self.user_id_for_api(),
+            self.access_token
+        )
+    }
+
+    fn user_id_for_api(&self) -> String {
+        self.user_id_for_header
+            .clone()
+            .unwrap_or_else(|| self.user_id.to_string())
     }
 }
 
-fn cuid_to_user_id(cuid: &str) -> u64 {
+pub(crate) fn cuid_to_user_id(cuid: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     cuid.hash(&mut hasher);
     let hash = hasher.finish();
@@ -371,16 +383,24 @@ impl ClientCredentialsProvider {
             }
 
             let server_url = self.server_url(cx).ok()?;
-            let (user_id, access_token) = self
+            let (user_id_str, access_token) = self
                 .provider
                 .read_credentials(&server_url, cx)
                 .await
                 .log_err()
                 .flatten()?;
 
+            let access_token = String::from_utf8(access_token).ok()?;
+            let (user_id, user_id_for_header) = if let Ok(u) = user_id_str.parse() {
+                (u, None)
+            } else {
+                (cuid_to_user_id(&user_id_str), Some(user_id_str))
+            };
+
             Some(Credentials {
-                user_id: user_id.parse().ok()?,
-                access_token: String::from_utf8(access_token).ok()?,
+                user_id,
+                access_token,
+                user_id_for_header,
             })
         }
         .boxed_local()
@@ -389,7 +409,7 @@ impl ClientCredentialsProvider {
     /// Writes the credentials to the provider.
     fn write_credentials<'a>(
         &'a self,
-        user_id: u64,
+        user_id: impl AsRef<str>,
         access_token: String,
         cx: &'a AsyncApp,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
@@ -398,7 +418,7 @@ impl ClientCredentialsProvider {
             self.provider
                 .write_credentials(
                     &server_url,
-                    &user_id.to_string(),
+                    user_id.as_ref(),
                     access_token.as_bytes(),
                     cx,
                 )
@@ -890,7 +910,11 @@ impl Client {
                         Ok(creds) => {
                             if IMPERSONATE_LOGIN.is_none() {
                                 self.credentials_provider
-                                    .write_credentials(creds.user_id, creds.access_token.clone(), cx)
+                                    .write_credentials(
+                                        creds.user_id_for_api(),
+                                        creds.access_token.clone(),
+                                        cx,
+                                    )
                                     .await
                                     .log_err();
                             }
@@ -912,7 +936,7 @@ impl Client {
         let credentials = credentials.unwrap();
         self.set_id(credentials.user_id);
         self.cloud_client
-            .set_credentials(credentials.user_id as u32, credentials.access_token.clone());
+            .set_credentials(credentials.user_id_for_api(), credentials.access_token.clone());
         self.state.write().credentials = Some(credentials.clone());
         self.set_status(
             if is_reauthenticating {
@@ -933,7 +957,7 @@ impl Client {
     ) -> Result<bool> {
         match self
             .cloud_client
-            .validate_credentials(credentials.user_id as u32, &credentials.access_token)
+            .validate_credentials(credentials.user_id_for_api(), &credentials.access_token)
             .await
         {
             Ok(valid) => Ok(valid),
@@ -1469,13 +1493,16 @@ impl Client {
                             .context("failed to decrypt access token")?,
                     };
 
-                    let user_id = user_id
-                        .parse()
-                        .unwrap_or_else(|_| cuid_to_user_id(&user_id));
+                    let (user_id, user_id_for_header) = if let Ok(u) = user_id.parse() {
+                        (u, None)
+                    } else {
+                        (cuid_to_user_id(&user_id), Some(user_id))
+                    };
 
                     Ok(Credentials {
                         user_id,
                         access_token,
+                        user_id_for_header,
                     })
                 })
                 .await?;
@@ -1528,6 +1555,7 @@ impl Client {
 
         Ok(Credentials {
             user_id: response.user_id,
+            user_id_for_header: None,
             access_token: response.access_token,
         })
     }
@@ -1939,6 +1967,7 @@ mod tests {
                 Ok(Credentials {
                     user_id,
                     access_token: "token".into(),
+                    user_id_for_header: None,
                 })
             })
         });
@@ -2010,6 +2039,7 @@ mod tests {
                     Ok(Credentials {
                         user_id: 1,
                         access_token: auth_count.lock().to_string(),
+                        user_id_for_header: None,
                     })
                 })
             }

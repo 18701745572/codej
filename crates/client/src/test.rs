@@ -54,6 +54,7 @@ impl FakeServer {
                                 != Some(Credentials {
                                     user_id: client_user_id,
                                     access_token: state.lock().access_token.to_string(),
+                                    user_id_for_header: None,
                                 })
                             {
                                 return Ok(http_client::Response::builder()
@@ -92,6 +93,7 @@ impl FakeServer {
                         Ok(Credentials {
                             user_id: client_user_id,
                             access_token,
+                            user_id_for_header: None,
                         })
                     })
                 }
@@ -116,6 +118,7 @@ impl FakeServer {
                             != (Credentials {
                                 user_id: client_user_id,
                                 access_token: state.lock().access_token.to_string(),
+                                user_id_for_header: None,
                             })
                         {
                             Err(EstablishConnectionError::Unauthorized)?
@@ -245,11 +248,17 @@ pub fn parse_authorization_header(req: &Request<AsyncBody>) -> Option<Credential
         .to_str()
         .ok()?
         .split_whitespace();
-    let user_id = auth_header.next()?.parse().ok()?;
+    let user_id_str = auth_header.next()?;
     let access_token = auth_header.next()?;
+    let (user_id, user_id_for_header) = if let Ok(u) = user_id_str.parse() {
+        (u, None)
+    } else {
+        (super::cuid_to_user_id(user_id_str), Some(user_id_str.to_string()))
+    };
     Some(Credentials {
         user_id,
         access_token: access_token.to_string(),
+        user_id_for_header,
     })
 }
 

@@ -213,6 +213,7 @@ impl TestServer {
                                 != Some(Credentials {
                                     user_id: user_id.to_proto(),
                                     access_token: ACCESS_TOKEN.into(),
+                                    user_id_for_header: None,
                                 })
                             {
                                 return Ok(http_client::Response::builder()
@@ -255,6 +256,7 @@ impl TestServer {
                     Ok(Credentials {
                         user_id: user_id.to_proto(),
                         access_token: ACCESS_TOKEN.into(),
+                        user_id_for_header: None,
                     })
                 })
             })
@@ -264,6 +266,7 @@ impl TestServer {
                     &Credentials {
                         user_id: user_id.0 as u64,
                         access_token: ACCESS_TOKEN.into(),
+                        user_id_for_header: None,
                     }
                 );
 

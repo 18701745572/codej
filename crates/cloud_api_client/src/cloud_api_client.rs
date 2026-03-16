@@ -19,7 +19,7 @@ use yawc::WebSocket;
 use crate::websocket::Connection;
 
 struct Credentials {
-    user_id: u32,
+    user_id: String,
     access_token: String,
 }
 
@@ -48,9 +48,9 @@ impl CloudApiClient {
         self.credentials.read().is_some()
     }
 
-    pub fn set_credentials(&self, user_id: u32, access_token: String) {
+    pub fn set_credentials(&self, user_id: impl Into<String>, access_token: String) {
         *self.credentials.write() = Some(Credentials {
-            user_id,
+            user_id: user_id.into(),
             access_token,
         });
     }
@@ -286,7 +286,11 @@ impl CloudApiClient {
         Ok(serde_json::from_str(&body).context("failed to parse response body")?)
     }
 
-    pub async fn validate_credentials(&self, user_id: u32, access_token: &str) -> Result<bool> {
+    pub async fn validate_credentials(
+        &self,
+        user_id: impl Into<String>,
+        access_token: &str,
+    ) -> Result<bool> {
         let request = build_request(
             Request::builder().method(Method::GET).uri(
                 self.http_client
@@ -295,7 +299,7 @@ impl CloudApiClient {
             ),
             AsyncBody::default(),
             &Credentials {
-                user_id,
+                user_id: user_id.into(),
                 access_token: access_token.into(),
             },
         )?;

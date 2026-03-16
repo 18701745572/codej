@@ -83,7 +83,33 @@
 
 ---
 
-### 2.5 客户端用户模块（CodeJ 同步逻辑）
+### 2.5 CUID 用户 ID 支持（CodeJ）
+
+**文件**：`crates/client/src/client.rs`、`crates/cloud_api_client/src/cloud_api_client.rs`
+
+**变更**：CodeJ 使用 CUID 字符串作为用户 ID，而 Zed 原设计使用数字 ID。为使 `Authorization` 请求头与 CodeJ 的 `verifyAccessToken` 匹配，需在 API 请求中传递原始 CUID。
+
+1. **`Credentials` 新增 `user_id_for_header` 字段**
+   - `Option<String>`：CodeJ 时为 `Some(cuid)`，Zed 时为 `None`
+   - 用于 `Authorization` 请求头及凭据存储
+   - 新增 `user_id_for_api()` 方法，返回用于 API 的 user_id 字符串
+
+2. **回调解析逻辑**
+   - 若 `user_id` 可解析为 `u64`（Zed）：`user_id_for_header = None`
+   - 若为 CUID（CodeJ）：`user_id_for_header = Some(user_id)`，内部 `user_id` 由 `cuid_to_user_id()` 计算
+
+3. **`cloud_api_client` 变更**
+   - `Credentials` 内部 `user_id` 改为 `String`，支持任意字符串
+   - `set_credentials(user_id: impl Into<String>, access_token)`：接受字符串形式 user_id
+   - `validate_credentials(user_id: impl Into<String>, access_token)`：同上
+
+4. **凭据读写**
+   - `write_credentials` 改为接受 `impl AsRef<str>`，存储 `user_id_for_api()` 的返回值
+   - `read_credentials` 解析存储的字符串：数字则 `user_id_for_header = None`，否则视为 CUID
+
+---
+
+### 2.6 客户端用户模块（CodeJ 同步逻辑）
 
 **文件**：`crates/client/src/user.rs`
 
@@ -109,9 +135,9 @@
 | 文件路径 | 变更类型 |
 |----------|----------|
 | `assets/settings/default.json` | 修改默认配置 |
-| `crates/client/src/client.rs` | 登录回调支持 `encrypted=false` 明文 token |
+| `crates/client/src/client.rs` | 登录回调支持 `encrypted=false`；Credentials 新增 `user_id_for_header` 支持 CUID |
 | `crates/cloud_api_types/src/cloud_api_types.rs` | 新增类型定义 |
-| `crates/cloud_api_client/src/cloud_api_client.rs` | 新增 API 方法 |
+| `crates/cloud_api_client/src/cloud_api_client.rs` | 新增 API 方法；`set_credentials`/`validate_credentials` 支持字符串 user_id |
 | `crates/client/src/user.rs` | 新增 CodeJ 同步逻辑 |
 
 ---
@@ -120,6 +146,7 @@
 
 ### 4.1 CodeJ 需实现的 API
 
+- **`GET /client/users/me`**（必需）：返回 Zed 兼容的 `GetAuthenticatedUserResponse` 格式，包含 `user`、`feature_flags`、`organizations`、`plan` 等，否则 Zed 无法解析响应、标题栏仍显示 Sign In。CodeJ 实现见 `codej.cn/app/client/users/me/route.ts`
 - `GET /client/user_preferences`：返回用户模型偏好
 - `PUT /client/user_preferences`：更新用户模型偏好
 - `GET /client/api_keys`：返回用户 API Key（明文，供 Zed 拉取后写入本地）
@@ -137,9 +164,10 @@ http://127.0.0.1:{port}?user_id={user_id}&access_token={plain_token}&encrypted=f
 - `access_token`：明文 access_token（无需 RSA 加密）
 - `encrypted=false`：标识 token 为明文，客户端将直接使用
 
-### 4.3 回调 user_id 兼容性
+### 4.3 回调 user_id 与 Authorization 兼容性
 
-**重要**：Zed 在登录回调中通过 `user_id.parse()?` 将 `user_id` 解析为 `u64`。CodeJ 使用 CUID 字符串，客户端已通过 `cuid_to_user_id()` 做兼容处理。
+- **回调解析**：`user_id` 可解析为 `u64` 时（Zed）使用数字；否则视为 CUID（CodeJ），通过 `cuid_to_user_id()` 计算内部 `user_id`，并存储 `user_id_for_header: Some(cuid)`
+- **API 请求**：`Authorization` 请求头格式为 `{user_id} {access_token}`。CodeJ 场景下必须传递原始 CUID，否则 `verifyAccessToken` 无法匹配数据库中的 token
 
 ---
 
