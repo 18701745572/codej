@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result};
+use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
 use base64::prelude::*;
 use rand::prelude::*;
 use rsa::pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey};
@@ -67,8 +68,9 @@ impl PublicKey {
 impl PrivateKey {
     /// Decrypt a base64-encoded string that was encrypted by the corresponding public key.
     pub fn decrypt_string(&self, encrypted_string: &str) -> Result<String> {
-        let encrypted_bytes = BASE64_URL_SAFE
+        let encrypted_bytes = URL_SAFE
             .decode(encrypted_string)
+            .or_else(|_| URL_SAFE_NO_PAD.decode(encrypted_string))
             .context("failed to base64-decode encrypted string")?;
         let bytes = self
             .0

@@ -7,12 +7,13 @@
 | 文件 | 新增 | 删除 | 净增 |
 |------|------|------|------|
 | `assets/settings/default.json` | 1 | 1 | 0 |
+| `crates/client/src/client.rs` | ~15 | ~3 | ~12 |
 | `crates/client/src/user.rs` | ~85 | 0 | ~85 |
 | `crates/cloud_api_client/src/cloud_api_client.rs` | ~96 | 1 | ~95 |
 | `crates/cloud_api_types/src/cloud_api_types.rs` | 17 | 0 | 17 |
-| **合计** | **~199** | **~2** | **~197** |
+| **合计** | **~214** | **~5** | **~209** |
 
-共修改 4 个文件，净增约 197 行代码。
+共修改 5 个文件，净增约 209 行代码。
 
 ---
 
@@ -66,7 +67,23 @@
 
 ---
 
-### 2.4 客户端用户模块（CodeJ 同步逻辑）
+### 2.4 登录回调支持明文 token（CodeJ）
+
+**文件**：`crates/client/src/client.rs`
+
+**变更**：支持 CodeJ 使用明文 token 的登录回调，避免 Node.js 与 Rust RSA 实现差异导致解密失败。
+
+1. **`CallbackParams` 新增 `encrypted` 字段**
+   - 可选参数，用于标识 `access_token` 是否已加密
+   - `encrypted=false` 时表示明文 token，无需解密
+
+2. **解密逻辑调整**
+   - 当 `encrypted=Some("false")` 时，直接使用 `access_token` 作为凭据
+   - 否则按原逻辑使用 RSA 私钥解密（兼容 zed.dev）
+
+---
+
+### 2.5 客户端用户模块（CodeJ 同步逻辑）
 
 **文件**：`crates/client/src/user.rs`
 
@@ -92,6 +109,7 @@
 | 文件路径 | 变更类型 |
 |----------|----------|
 | `assets/settings/default.json` | 修改默认配置 |
+| `crates/client/src/client.rs` | 登录回调支持 `encrypted=false` 明文 token |
 | `crates/cloud_api_types/src/cloud_api_types.rs` | 新增类型定义 |
 | `crates/cloud_api_client/src/cloud_api_client.rs` | 新增 API 方法 |
 | `crates/client/src/user.rs` | 新增 CodeJ 同步逻辑 |
@@ -107,11 +125,21 @@
 - `GET /client/api_keys`：返回用户 API Key（明文，供 Zed 拉取后写入本地）
 - `PUT /client/api_keys`：更新用户 API Key
 
-### 4.2 回调 user_id 兼容性
+### 4.2 登录回调格式（CodeJ）
 
-**重要**：Zed 在登录回调中通过 `user_id.parse()?` 将 `user_id` 解析为 `u64`。CodeJ 当前使用 CUID 字符串，会导致解析失败。
+CodeJ 使用明文 token 回调，需在 `redirectUrl` 中附带 `encrypted=false`：
 
-**建议**：在 CodeJ 的 User 表中增加 `zedUserId`（数字类型），并在登录回调中使用该字段作为 `user_id` 返回。
+```
+http://127.0.0.1:{port}?user_id={user_id}&access_token={plain_token}&encrypted=false
+```
+
+- `user_id`：CodeJ 用户 ID（CUID 字符串）
+- `access_token`：明文 access_token（无需 RSA 加密）
+- `encrypted=false`：标识 token 为明文，客户端将直接使用
+
+### 4.3 回调 user_id 兼容性
+
+**重要**：Zed 在登录回调中通过 `user_id.parse()?` 将 `user_id` 解析为 `u64`。CodeJ 使用 CUID 字符串，客户端已通过 `cuid_to_user_id()` 做兼容处理。
 
 ---
 

@@ -34,8 +34,10 @@ use serde::{Deserialize, Serialize};
 use settings::{RegisterSetting, Settings, SettingsContent};
 use std::{
     any::TypeId,
+    collections::hash_map::DefaultHasher,
     convert::TryFrom,
     future::Future,
+    hash::{Hash, Hasher},
     marker::PhantomData,
     path::PathBuf,
     sync::{
@@ -329,6 +331,17 @@ pub struct Credentials {
 impl Credentials {
     pub fn authorization_header(&self) -> String {
         format!("{} {}", self.user_id, self.access_token)
+    }
+}
+
+fn cuid_to_user_id(cuid: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    cuid.hash(&mut hasher);
+    let hash = hasher.finish();
+    if hash == 0 {
+        1
+    } else {
+        hash
     }
 }
 
@@ -1403,6 +1416,8 @@ impl Client {
                     struct CallbackParams {
                         pub user_id: String,
                         pub access_token: String,
+                        #[serde(default)]
+                        pub encrypted: Option<String>,
                     }
 
                     // Receive the HTTP request from the user's browser. Retrieve the user id and encrypted
@@ -1410,7 +1425,7 @@ impl Client {
                     //
                     // TODO - Avoid ever starting more than one HTTP server. Maybe switch to using a
                     // custom URL scheme instead of this local HTTP server.
-                    let (user_id, access_token) = background
+                    let (user_id, access_token, encrypted) = background
                         .spawn(async move {
                             for _ in 0..100 {
                                 if let Some(req) = server.recv_timeout(Duration::from_secs(1))? {
@@ -1438,6 +1453,7 @@ impl Client {
                                     return Ok((
                                         callback_params.user_id,
                                         callback_params.access_token,
+                                        callback_params.encrypted,
                                     ));
                                 }
                             }
@@ -1446,12 +1462,19 @@ impl Client {
                         })
                         .await?;
 
-                    let access_token = private_key
-                        .decrypt_string(&access_token)
-                        .context("failed to decrypt access token")?;
+                    let access_token = match encrypted.as_deref() {
+                        Some("false") => access_token,
+                        _ => private_key
+                            .decrypt_string(&access_token)
+                            .context("failed to decrypt access token")?,
+                    };
+
+                    let user_id = user_id
+                        .parse()
+                        .unwrap_or_else(|_| cuid_to_user_id(&user_id));
 
                     Ok(Credentials {
-                        user_id: user_id.parse()?,
+                        user_id,
                         access_token,
                     })
                 })
