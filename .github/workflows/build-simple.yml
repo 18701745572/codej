@@ -193,15 +193,23 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
+          $targetDir = "target\x86_64-pc-windows-msvc\release"
+          $hostDir = "target\release"
+          $zedExe = if (Test-Path "$targetDir\zed.exe") { "$targetDir\zed.exe" } elseif (Test-Path "$hostDir\zed.exe") { "$hostDir\zed.exe" } else { $null }
+          $cliExe = if (Test-Path "$targetDir\cli.exe") { "$targetDir\cli.exe" } elseif (Test-Path "$hostDir\cli.exe") { "$hostDir\cli.exe" } else { $null }
+          $remoteExe = if (Test-Path "$targetDir\remote_server.exe") { "$targetDir\remote_server.exe" } elseif (Test-Path "$hostDir\remote_server.exe") { "$hostDir\remote_server.exe" } else { $null }
+          if (-not $zedExe) { Write-Error "zed.exe not found in $targetDir or $hostDir. Build may have failed."; exit 1 }
+          if (-not $cliExe) { Write-Error "cli.exe not found in $targetDir or $hostDir. Build may have failed."; exit 1 }
+          if (-not $remoteExe) { Write-Error "remote_server.exe not found in $targetDir or $hostDir. Build may have failed."; exit 1 }
           $out = "${{ github.workspace }}\target\release-packages"
           New-Item -Path $out -ItemType Directory -Force
-          Copy-Item "target\x86_64-pc-windows-msvc\release\zed.exe" "$out\"
-          Copy-Item "target\x86_64-pc-windows-msvc\release\cli.exe" "$out\cli.exe"
-          Copy-Item "target\x86_64-pc-windows-msvc\release\cli.exe" "$out\zed-cli.exe"
+          Copy-Item $zedExe "$out\"
+          Copy-Item $cliExe "$out\cli.exe"
+          Copy-Item $cliExe "$out\zed-cli.exe"
           Copy-Item "script\install-windows.ps1" "$out\install.ps1"
           Copy-Item "script\windows-portable-README.txt" "$out\README.txt"
           Compress-Archive -Path "$out\*" -DestinationPath "target\Zed-windows-x86_64.zip" -Force
-          Compress-Archive -Path "target\x86_64-pc-windows-msvc\release\remote_server.exe" -DestinationPath "target\zed-remote-server-windows-x86_64.zip" -Force
+          Compress-Archive -Path $remoteExe -DestinationPath "target\zed-remote-server-windows-x86_64.zip" -Force
 
       - name: Upload
         uses: actions/upload-artifact@v4
