@@ -409,7 +409,7 @@ impl ClientCredentialsProvider {
     /// Writes the credentials to the provider.
     fn write_credentials<'a>(
         &'a self,
-        user_id: impl AsRef<str>,
+        user_id: impl AsRef<str> + 'a,
         access_token: String,
         cx: &'a AsyncApp,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + 'a>> {
