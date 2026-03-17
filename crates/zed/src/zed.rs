@@ -1,4 +1,5 @@
 mod app_menus;
+pub(crate) mod codej_login_modal;
 pub mod edit_prediction_registry;
 #[cfg(target_os = "macos")]
 pub(crate) mod mac_only_instance;

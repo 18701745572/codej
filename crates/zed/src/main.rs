@@ -566,7 +566,30 @@ fn main() {
         project::Project::init(&client, cx);
         debugger_ui::init(cx);
         debugger_tools::init(cx);
-        client::init(&client, cx);
+        client::init_with_codej_handler(
+            &client,
+            cx,
+            Some(Arc::new(move |client, cx| {
+                if let Some(window_handle) = cx.active_window() {
+                    let _ = cx.update_window(window_handle, |root, window, cx| {
+                        if let Ok(mw) = root.downcast::<MultiWorkspace>() {
+                            mw.update(cx, |mw, cx| {
+                                mw.toggle_modal(window, cx, |window, cx| {
+                                    zed::codej_login_modal::CodeJLoginModal::new(
+                                        client, window, cx,
+                                    )
+                                });
+                            });
+                        }
+                    });
+                } else {
+                    cx.spawn(move |cx| async move {
+                        client.sign_in_with_optional_connect(true, &cx).await
+                    })
+                    .detach_and_log_err(cx);
+                }
+            })),
+        );
 
         let system_id = cx.foreground_executor().block_on(system_id).ok();
         let installation_id = cx.foreground_executor().block_on(installation_id).ok();

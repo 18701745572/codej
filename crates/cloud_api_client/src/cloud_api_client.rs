@@ -6,6 +6,7 @@ use anyhow::{Context, Result, anyhow};
 use cloud_api_types::websocket_protocol::{PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER_NAME};
 pub use cloud_api_types::{UserApiKeys, UserPreferences, *};
 use futures::AsyncReadExt as _;
+use serde::{Deserialize, Serialize};
 use gpui::{App, Task};
 use gpui_tokio::Tokio;
 use http_client::http::request;
@@ -29,6 +30,12 @@ pub enum ClientApiError {
     Unauthorized,
     #[error(transparent)]
     Other(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CodeJAuthResponse {
+    pub user_id: String,
+    pub access_token: String,
 }
 
 pub struct CloudApiClient {
@@ -204,6 +211,72 @@ impl CloudApiClient {
             return Ok(Some(Default::default()));
         }
         Ok(Some(keys))
+    }
+
+    /// CodeJ API: login with email and password. Returns (user_id, access_token).
+    pub async fn codej_login(&self, email: &str, password: &str) -> Result<CodeJAuthResponse> {
+        #[derive(Serialize)]
+        struct LoginBody<'a> {
+            email: &'a str,
+            password: &'a str,
+        }
+
+        let url = self
+            .http_client
+            .build_zed_cloud_url("/api/auth/login")?;
+        let request = Request::post(url.as_str())
+            .header("Content-Type", "application/json")
+            .body(AsyncBody::from(serde_json::to_string(&LoginBody { email, password })?))?;
+
+        let mut response = self.http_client.send(request).await?;
+        let mut body = String::new();
+        response
+            .body_mut()
+            .read_to_string(&mut body)
+            .await
+            .context("failed to read response body")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "CodeJ login failed. Status: {:?} Body: {body}",
+                response.status()
+            ));
+        }
+
+        serde_json::from_str(&body).context("failed to parse login response")
+    }
+
+    /// CodeJ API: register with email and password. Returns (user_id, access_token).
+    pub async fn codej_register(&self, email: &str, password: &str) -> Result<CodeJAuthResponse> {
+        #[derive(Serialize)]
+        struct RegisterBody<'a> {
+            email: &'a str,
+            password: &'a str,
+        }
+
+        let url = self
+            .http_client
+            .build_zed_cloud_url("/api/auth/register")?;
+        let request = Request::post(url.as_str())
+            .header("Content-Type", "application/json")
+            .body(AsyncBody::from(serde_json::to_string(&RegisterBody { email, password })?))?;
+
+        let mut response = self.http_client.send(request).await?;
+        let mut body = String::new();
+        response
+            .body_mut()
+            .read_to_string(&mut body)
+            .await
+            .context("failed to read response body")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "CodeJ register failed. Status: {:?} Body: {body}",
+                response.status()
+            ));
+        }
+
+        serde_json::from_str(&body).context("failed to parse register response")
     }
 
     pub fn connect(&self, cx: &App) -> Result<Task<Result<Connection>>> {

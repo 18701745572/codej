@@ -6972,9 +6972,30 @@ fn ai_page() -> SettingsPage {
         ]
     }
 
-    fn agent_configuration_section() -> [SettingsPageItem; 12] {
+    fn agent_configuration_section() -> [SettingsPageItem; 13] {
         [
             SettingsPageItem::SectionHeader("Agent Configuration"),
+            SettingsPageItem::ActionLink(ActionLink {
+                title: "LLM Providers".into(),
+                description: Some("Add and configure language model providers (e.g. OpenAI, Kimi) for the Agent.".into()),
+                button_text: "Configure >".into(),
+                on_click: Arc::new(|settings_window, window, cx| {
+                    let Some(original_window) = settings_window.original_window else {
+                        return;
+                    };
+                    original_window
+                        .update(cx, |_multi_workspace, original_window, cx| {
+                            original_window.activate_window();
+                            original_window.dispatch_action(
+                                zed_actions::agent::OpenSettings.boxed_clone(),
+                                cx,
+                            );
+                        })
+                        .ok();
+                    window.remove_window();
+                }),
+                files: USER,
+            }),
             SettingsPageItem::SubPageLink(SubPageLink {
                 title: "Tool Permissions".into(),
                 r#type: Default::default(),

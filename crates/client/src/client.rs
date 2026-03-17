@@ -55,7 +55,7 @@ use util::{ConnectionResult, ResultExt};
 
 pub use rpc::*;
 pub use telemetry_events::Event;
-pub use user::*;
+pub use user::{is_codej_server, *};
 
 static ZED_SERVER_URL: LazyLock<Option<String>> =
     LazyLock::new(|| std::env::var("ZED_SERVER_URL").ok());
@@ -149,12 +149,31 @@ impl Settings for ProxySettings {
     }
 }
 
+pub type CodejSignInHandler = Arc<dyn Fn(Arc<Client>, &mut App) + Send + Sync>;
+
 pub fn init(client: &Arc<Client>, cx: &mut App) {
+    init_with_codej_handler(client, cx, None);
+}
+
+pub fn init_with_codej_handler(
+    client: &Arc<Client>,
+    cx: &mut App,
+    codej_sign_in_handler: Option<CodejSignInHandler>,
+) {
     let client = Arc::downgrade(client);
+    let codej_sign_in_handler = codej_sign_in_handler;
     cx.on_action({
         let client = client.clone();
+        let codej_sign_in_handler = codej_sign_in_handler.clone();
         move |_: &SignIn, cx| {
             if let Some(client) = client.upgrade() {
+                let server_url = ClientSettings::get_global(cx).server_url.clone();
+                if is_codej_server(&server_url) {
+                    if let Some(handler) = &codej_sign_in_handler {
+                        handler(client, cx);
+                        return;
+                    }
+                }
                 cx.spawn(async move |cx| client.sign_in_with_optional_connect(true, cx).await)
                     .detach_and_log_err(cx);
             }
@@ -1029,6 +1048,156 @@ impl Client {
                     let is_staff = is_staff_rx.await?;
                     if is_staff {
                         match client.connect_with_credentials(credentials, cx).await {
+                            ConnectionResult::Timeout => Err(anyhow!("connection timed out")),
+                            ConnectionResult::ConnectionReset => Err(anyhow!("connection reset")),
+                            ConnectionResult::Result(result) => {
+                                result.context("client auth and connect")
+                            }
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+            })
+            .detach_and_log_err(cx);
+        });
+
+        Ok(())
+    }
+
+    /// CodeJ API login: sign in with email and password via REST API.
+    pub async fn sign_in_with_api_credentials(
+        self: &Arc<Self>,
+        email: &str,
+        password: &str,
+        cx: &AsyncApp,
+    ) -> Result<()> {
+        self.set_status(Status::Authenticating, cx);
+
+        let auth = self
+            .cloud_client
+            .codej_login(email, password)
+            .await
+            .map_err(|err| {
+                self.set_status(Status::AuthenticationError, cx);
+                err
+            })?;
+
+        let credentials = Credentials {
+            user_id: cuid_to_user_id(&auth.user_id),
+            access_token: auth.access_token,
+            user_id_for_header: Some(auth.user_id),
+        };
+
+        self.credentials_provider
+            .write_credentials(credentials.user_id_for_api(), credentials.access_token.clone(), cx)
+            .await
+            .log_err();
+
+        self.set_id(credentials.user_id);
+        self.cloud_client
+            .set_credentials(credentials.user_id_for_api(), credentials.access_token.clone());
+        self.state.write().credentials = Some(credentials.clone());
+        self.set_status(Status::Authenticated, cx);
+
+        self.connect_to_cloud(cx).await.log_err();
+
+        let (is_staff_tx, is_staff_rx) = oneshot::channel::<bool>();
+        let mut is_staff_tx = Some(is_staff_tx);
+        cx.update(|cx| {
+            cx.on_flags_ready(move |state, _cx| {
+                if let Some(is_staff_tx) = is_staff_tx.take() {
+                    is_staff_tx.send(state.is_staff).log_err();
+                }
+            })
+            .detach();
+        });
+
+        cx.update(move |cx| {
+            cx.spawn({
+                let client = self.clone();
+                async move |cx| {
+                    let is_staff = is_staff_rx.await.unwrap_or(false);
+                    if is_staff {
+                        match client
+                            .connect_with_credentials(credentials, cx)
+                            .await
+                        {
+                            ConnectionResult::Timeout => Err(anyhow!("connection timed out")),
+                            ConnectionResult::ConnectionReset => Err(anyhow!("connection reset")),
+                            ConnectionResult::Result(result) => {
+                                result.context("client auth and connect")
+                            }
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+            })
+            .detach_and_log_err(cx);
+        });
+
+        Ok(())
+    }
+
+    /// CodeJ API register: create account and sign in via REST API.
+    pub async fn sign_in_with_api_register(
+        self: &Arc<Self>,
+        email: &str,
+        password: &str,
+        cx: &AsyncApp,
+    ) -> Result<()> {
+        self.set_status(Status::Authenticating, cx);
+
+        let auth = self
+            .cloud_client
+            .codej_register(email, password)
+            .await
+            .map_err(|err| {
+                self.set_status(Status::AuthenticationError, cx);
+                err
+            })?;
+
+        let credentials = Credentials {
+            user_id: cuid_to_user_id(&auth.user_id),
+            access_token: auth.access_token,
+            user_id_for_header: Some(auth.user_id),
+        };
+
+        self.credentials_provider
+            .write_credentials(credentials.user_id_for_api(), credentials.access_token.clone(), cx)
+            .await
+            .log_err();
+
+        self.set_id(credentials.user_id);
+        self.cloud_client
+            .set_credentials(credentials.user_id_for_api(), credentials.access_token.clone());
+        self.state.write().credentials = Some(credentials.clone());
+        self.set_status(Status::Authenticated, cx);
+
+        self.connect_to_cloud(cx).await.log_err();
+
+        let (is_staff_tx, is_staff_rx) = oneshot::channel::<bool>();
+        let mut is_staff_tx = Some(is_staff_tx);
+        cx.update(|cx| {
+            cx.on_flags_ready(move |state, _cx| {
+                if let Some(is_staff_tx) = is_staff_tx.take() {
+                    is_staff_tx.send(state.is_staff).log_err();
+                }
+            })
+            .detach();
+        });
+
+        cx.update(move |cx| {
+            cx.spawn({
+                let client = self.clone();
+                async move |cx| {
+                    let is_staff = is_staff_rx.await.unwrap_or(false);
+                    if is_staff {
+                        match client
+                            .connect_with_credentials(credentials, cx)
+                            .await
+                        {
                             ConnectionResult::Timeout => Err(anyhow!("connection timed out")),
                             ConnectionResult::ConnectionReset => Err(anyhow!("connection reset")),
                             ConnectionResult::Result(result) => {

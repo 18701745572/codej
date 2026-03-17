@@ -27,7 +27,7 @@ use settings::Settings;
 use text::ReplicaId;
 use util::{ResultExt, TryFutureExt as _};
 
-fn is_codej_server(server_url: &str) -> bool {
+pub fn is_codej_server(server_url: &str) -> bool {
     !matches!(
         server_url,
         "https://zed.dev" | "https://staging.zed.dev" | "http://localhost:3000"
