@@ -7,7 +7,6 @@ use ui::{
     IntoElement, Label, LabelCommon, LabelSize, ParentElement, Render, StyledExt, Window, h_flex,
     v_flex,
 };
-use util::ResultExt;
 use workspace::ModalView;
 
 pub struct CodeJLoginModal {
@@ -64,7 +63,6 @@ impl CodeJLoginModal {
             client
                 .sign_in_with_api_credentials(&email, &password, cx)
                 .await
-                .log_err();
         })
         .detach_and_log_err(cx);
 
@@ -88,7 +86,6 @@ impl CodeJLoginModal {
             client
                 .sign_in_with_api_register(&email, &password, cx)
                 .await
-                .log_err();
         })
         .detach_and_log_err(cx);
 
@@ -97,8 +94,8 @@ impl CodeJLoginModal {
 
     fn use_browser(&mut self, cx: &mut Context<Self>) {
         let client = self.client.clone();
-        cx.spawn(move |_this, cx| async move {
-            client.sign_in_with_optional_connect(true, cx).await.log_err();
+        cx.spawn(async move |_this, cx| {
+            client.sign_in_with_optional_connect(true, cx).await
         })
         .detach_and_log_err(cx);
         cx.emit(DismissEvent);
@@ -106,7 +103,7 @@ impl CodeJLoginModal {
 }
 
 impl Render for CodeJLoginModal {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
         v_flex()
             .key_context("CodeJLoginModal")
