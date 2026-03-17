@@ -1,11 +1,11 @@
 use client::Client;
 use editor::Editor;
-use gpui::{AppContext, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Styled, rems};
+use gpui::{AppContext as _, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, ReadGlobal, Styled, rems};
 use std::sync::Arc;
 use ui::{
-    Button, Clickable, Color, Context, Headline, HeadlineSize, InteractiveElement, IntoElement,
-    Label, LabelSize, ParentElement, Render, StyledExt, StyledTypography, Window, div, h_flex,
-    v_flex,
+    ActiveTheme, App, Button, Clickable, Color, Context, Headline, HeadlineSize, InteractiveElement,
+    IntoElement, Label, LabelCommon, LabelSize, ParentElement, Render, StyledExt, Window, div,
+    h_flex, v_flex,
 };
 use util::ResultExt;
 use workspace::ModalView;
@@ -21,7 +21,7 @@ impl EventEmitter<DismissEvent> for CodeJLoginModal {}
 impl ModalView for CodeJLoginModal {}
 
 impl Focusable for CodeJLoginModal {
-    fn focus_handle(&self, _: &AppContext) -> FocusHandle {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
@@ -60,9 +60,9 @@ impl CodeJLoginModal {
         }
 
         let client = self.client.clone();
-        cx.spawn(move |cx| async move {
+        cx.spawn(move |_this, cx| async move {
             client
-                .sign_in_with_api_credentials(&email, &password, &cx)
+                .sign_in_with_api_credentials(&email, &password, cx)
                 .await
                 .log_err();
         })
@@ -84,9 +84,9 @@ impl CodeJLoginModal {
         }
 
         let client = self.client.clone();
-        cx.spawn(move |cx| async move {
+        cx.spawn(move |_this, cx| async move {
             client
-                .sign_in_with_api_register(&email, &password, &cx)
+                .sign_in_with_api_register(&email, &password, cx)
                 .await
                 .log_err();
         })
@@ -97,8 +97,8 @@ impl CodeJLoginModal {
 
     fn use_browser(&mut self, cx: &mut Context<Self>) {
         let client = self.client.clone();
-        cx.spawn(move |cx| async move {
-            client.sign_in_with_optional_connect(true, &cx).await.log_err();
+        cx.spawn(move |_this, cx| async move {
+            client.sign_in_with_optional_connect(true, cx).await.log_err();
         })
         .detach_and_log_err(cx);
         cx.emit(DismissEvent);
@@ -107,6 +107,7 @@ impl CodeJLoginModal {
 
 impl Render for CodeJLoginModal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
         v_flex()
             .key_context("CodeJLoginModal")
             .track_focus(&self.focus_handle(cx))
@@ -114,10 +115,10 @@ impl Render for CodeJLoginModal {
             .w(rems(28.))
             .p_4()
             .gap_3()
-            .bg(cx.theme().colors().editor_background)
+            .bg(theme.colors().editor_background)
             .rounded_lg()
             .border_1()
-            .border_color(cx.theme().colors().border_variant)
+            .border_color(theme.colors().border_variant)
             .child(
                 v_flex()
                     .gap_1()
