@@ -1,11 +1,11 @@
 use client::Client;
 use editor::Editor;
-use gpui::{AppContext as _, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, ReadGlobal, Styled, rems};
+use gpui::{AppContext as _, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, Styled, rems};
 use std::sync::Arc;
 use ui::{
     ActiveTheme, App, Button, Clickable, Color, Context, Headline, HeadlineSize, InteractiveElement,
-    IntoElement, Label, LabelCommon, LabelSize, ParentElement, Render, StyledExt, Window, div,
-    h_flex, v_flex,
+    IntoElement, Label, LabelCommon, LabelSize, ParentElement, Render, StyledExt, Window, h_flex,
+    v_flex,
 };
 use util::ResultExt;
 use workspace::ModalView;
@@ -60,7 +60,7 @@ impl CodeJLoginModal {
         }
 
         let client = self.client.clone();
-        cx.spawn(move |_this, cx| async move {
+        cx.spawn(async move |_this, cx| {
             client
                 .sign_in_with_api_credentials(&email, &password, cx)
                 .await
@@ -84,7 +84,7 @@ impl CodeJLoginModal {
         }
 
         let client = self.client.clone();
-        cx.spawn(move |_this, cx| async move {
+        cx.spawn(async move |_this, cx| {
             client
                 .sign_in_with_api_register(&email, &password, cx)
                 .await
@@ -123,7 +123,7 @@ impl Render for CodeJLoginModal {
                 v_flex()
                     .gap_1()
                     .child(
-                        Headline::new("CodeJ 登录".into())
+                        Headline::new("CodeJ 登录")
                             .size(HeadlineSize::Small)
                             .color(Color::Default),
                     )
