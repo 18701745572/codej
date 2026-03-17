@@ -583,8 +583,8 @@ fn main() {
                         }
                     });
                 } else {
-                    cx.spawn(move |cx| async move {
-                        client.sign_in_with_optional_connect(true, &cx).await
+                    cx.spawn(async move |cx| {
+                        client.sign_in_with_optional_connect(true, cx).await
                     })
                     .detach_and_log_err(cx);
                 }
